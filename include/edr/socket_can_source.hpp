@@ -1,6 +1,7 @@
 #ifndef EDR_SOCKET_CAN_SOURCE_HPP
 #define EDR_SOCKET_CAN_SOURCE_HPP
 
+#include <cstdint>
 #include <string>
 
 #include "edr/can_source.hpp"
@@ -12,7 +13,10 @@ namespace edr {
 // and is_open() reports it.
 class SocketCanSource : public ICanSource {
 public:
-    explicit SocketCanSource(const std::string& ifname);
+    // read_timeout_ms bounds how long read() blocks so the caller can
+    // keep polling the IDS even when the bus goes silent.
+    explicit SocketCanSource(const std::string& ifname,
+                             uint32_t read_timeout_ms = 100);
     ~SocketCanSource() override;
 
     SocketCanSource(const SocketCanSource&) = delete;

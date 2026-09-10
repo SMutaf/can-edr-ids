@@ -13,7 +13,8 @@
 
 namespace edr {
 
-SocketCanSource::SocketCanSource(const std::string& ifname) {
+SocketCanSource::SocketCanSource(const std::string& ifname,
+                                 uint32_t read_timeout_ms) {
     // 1. Open a raw CAN socket.
     fd_ = ::socket(PF_CAN, SOCK_RAW, CAN_RAW);
     if (fd_ < 0) {
@@ -46,6 +47,13 @@ SocketCanSource::SocketCanSource(const std::string& ifname) {
         close_fd();
         return;
     }
+
+    // 5. Bound receive timeout so read() cannot block forever when the
+    // bus goes silent. Non-fatal: the socket stays usable if it fails.
+    struct timeval tv;
+    tv.tv_sec = read_timeout_ms / 1000;
+    tv.tv_usec = static_cast<long>(read_timeout_ms % 1000) * 1000;
+    ::setsockopt(fd_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 }
 
 SocketCanSource::~SocketCanSource() {
@@ -95,6 +103,9 @@ bool SocketCanSource::read(RecordEntry& out) {
     msg.msg_control = control;
     msg.msg_controllen = sizeof(control);
 
+    // A timeout returns -1 with errno EAGAIN/EWOULDBLOCK; that is not an
+    // error, just "no frame this round". Either way the contract is the
+    // same: false means the caller retries (after check_timeouts).
     const ssize_t n = ::recvmsg(fd_, &msg, 0);
     if (n < static_cast<ssize_t>(sizeof(struct can_frame))) {
         return false;
