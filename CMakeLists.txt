@@ -23,6 +23,7 @@ target_link_libraries(edr PRIVATE edr_core)
 # Tests: opt-in, and only if tests/ actually has a build file yet.
 option(BUILD_TESTING "Build tests" ON)
 if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/CMakeLists.txt")
+    enable_testing()
     add_subdirectory(tests)
 endif()
 
