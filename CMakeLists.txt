@@ -28,5 +28,8 @@ if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/CMakeLists.txt")
 endif()
 
 # tools/ — standalone helpers. attacker has its own socket code and does
-# not need edr_core; analyzer added later.
+# not need edr_core; analyzer decodes .edr files via edr_core.
 add_executable(attacker tools/attacker.cpp)
+
+add_executable(analyzer tools/analyzer.cpp)
+target_link_libraries(analyzer PRIVATE edr_core)
