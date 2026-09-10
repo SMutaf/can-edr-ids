@@ -22,6 +22,7 @@ constexpr std::size_t RING_CAPACITY      = 2048;     // RecordEntry slots
 constexpr uint64_t    ANOMALY_WINDOW_US  = 1000000;  // sliding window, 1 s
 constexpr std::size_t ANOMALY_THRESHOLD  = 3;        // anomalies -> Attack
 constexpr uint64_t    POST_TRIGGER_US    = 500000;   // 0.5 s after trigger
+constexpr std::size_t POST_CAPACITY      = 2048;     // post-trigger ring size
 constexpr uint32_t    CRASH_CAN_ID       = 0x000;    // airbag-style trigger
 
 // -------------------------------------------------------------------------
@@ -110,8 +111,10 @@ int main(int argc, char** argv) {
         {0x300, 4, 0, 0},
     });
 
-    // Static: large buffer, kept off the stack, no heap.
-    static RingBuffer<RecordEntry, RING_CAPACITY> buffer;
+    // Static: large buffers, kept off the stack, no heap.
+    static RingBuffer<RecordEntry, RING_CAPACITY> buffer;  // live window
+    static RingBuffer<RecordEntry, RING_CAPACITY> frozen;  // frozen pre-trigger
+    static RingBuffer<RecordEntry, POST_CAPACITY> post;    // post-trigger window
 
     AnomalyWindow window;
 
@@ -129,6 +132,9 @@ int main(int argc, char** argv) {
         bool attack_trigger = false;
         uint8_t trigger_reason = 0;
 
+        RecordEntry this_frame{};   // the inspected frame this iteration
+        bool have_frame = false;    // false on timeout / crash iterations
+
         if (got) {
             if (entry.can_id == CRASH_CAN_ID) {
                 // Crash trigger: push the crash frame so it shows up in
@@ -144,6 +150,8 @@ int main(int argc, char** argv) {
             } else {
                 entry.flags = ids.inspect(entry);
                 buffer.push(entry);
+                this_frame = entry;
+                have_frame = true;
                 if (entry.flags != 0) {
                     std::cerr << "anomaly: can_id=0x" << std::hex << entry.can_id
                               << " flags=0x" << unsigned(entry.flags) << std::dec
@@ -175,16 +183,34 @@ int main(int argc, char** argv) {
             recording = true;
             post_deadline_us = now + POST_TRIGGER_US;
             pending_trigger = TriggerInfo{TriggerType::Attack, trigger_reason, now};
+
+            // Freeze the pre-trigger window so later traffic cannot
+            // overwrite the attack onset; start a fresh post window.
+            frozen.clear();
+            buffer.for_each([&](const RecordEntry& e) { frozen.push(e); });
+            post.clear();
+
             std::cerr << "TRIGGER: type=Attack reason=0x" << std::hex
                       << unsigned(trigger_reason) << std::dec << " collecting "
                       << POST_TRIGGER_US << " us of post-trigger data\n";
+        }
+
+        // While recording, mirror this iteration's frames into the post
+        // window. Runs after arming so the triggering frame is included.
+        if (recording) {
+            if (have_frame) {
+                post.push(this_frame);
+            }
+            for (const auto& m : missing) {
+                post.push(m);
+            }
         }
 
         // Flush once enough time has passed; checked every loop iteration
         // so a silent bus still flushes (the clock keeps advancing).
         if (recording && now >= post_deadline_us) {
             const std::string path = record_path(pending_trigger.trigger_time_us);
-            const bool ok = write_record(path, buffer, pending_trigger);
+            const bool ok = write_record(path, frozen, post, pending_trigger);
             std::cerr << "TRIGGER: type=Attack reason=0x" << std::hex
                       << unsigned(pending_trigger.reason) << std::dec
                       << " file=" << path << (ok ? "" : " (WRITE FAILED)")
