@@ -27,4 +27,6 @@ if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/CMakeLists.txt")
     add_subdirectory(tests)
 endif()
 
-# tools/ (attacker, analyzer) added later.
+# tools/ — standalone helpers. attacker has its own socket code and does
+# not need edr_core; analyzer added later.
+add_executable(attacker tools/attacker.cpp)
